@@ -11308,12 +11308,21 @@ async def bulk_delete_proxy_lines(request: Request, _=Depends(require_auth)):
     ids = body.get("ids", [])
     if not isinstance(ids, list) or not ids:
         raise HTTPException(status_code=400, detail="List of IDs required")
-    placeholders = ','.join(['?'] * len(ids))
-    await db_execute(
-        f"DELETE FROM proxy_lines WHERE id IN ({placeholders})",
-        f"DELETE FROM proxy_lines WHERE id = ANY($1)",
-        (ids,) if DB_BACKEND == "sqlite" else (ids,)
-    )
+    
+    if DB_BACKEND == "sqlite":
+        placeholders = ','.join(['?'] * len(ids))
+        await db_execute(
+            f"DELETE FROM proxy_lines WHERE id IN ({placeholders})",
+            "",
+            tuple(ids)
+        )
+    else:
+        await db_execute(
+            "",
+            "DELETE FROM proxy_lines WHERE id = ANY($1)",
+            (ids,)
+        )
+    
     return {"ok": True, "deleted": len(ids)}
 
 @app.post("/api/proxy-lines/resolve-flags")
