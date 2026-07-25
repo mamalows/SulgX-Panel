@@ -10836,15 +10836,21 @@ async function deleteSelectedProxies() {
     if (!confirm('Delete selected proxies?')) return;
     const ids = Array.from(selectedProxyIds);
     try {
-        await authenticatedFetch('/api/proxy-lines/bulk-delete', {
+        const r = await authenticatedFetch('/api/proxy-lines/bulk-delete', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ids })
         });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) {
+            throw new Error(data.detail || data.message || 'Server error');
+        }
         selectedProxyIds.clear();
         loadProxyLines();
         toast('Deleted');
-    } catch(e) { toast('Error', true); }
+    } catch (e) {
+        toast(e.message || 'Error', true);
+    }
 }
 
 async function deleteFailedProxies() {
@@ -11059,46 +11065,65 @@ async function importProxiesBulk() {
 
 async function testAllProxies() {
     const btn = document.querySelector('[onclick="testAllProxies()"]');
-    if (btn) { 
-        btn.disabled = true;
-        btn.textContent = 'Testing all...';
-    }
-    try {
-        const r = await authenticatedFetch('/api/proxy-lines/test-all', { method: 'POST' });
-        const d = await r.json();
-        if (d.results) {
-            const resultMap = new Map(d.results.map(res => [res.id, res]));
-            resultMap.forEach((res, id) => {
-                const statusEl = document.getElementById('proxy-status-' + id);
-                if (statusEl) {
-                    if (res.ok) {
-                        statusEl.innerHTML = `<span style="color:var(--green)">✅ ${res.latency_ms}ms</span>`;
-                    } else {
-                        statusEl.innerHTML = `<span style="color:var(--red)">❌ ${res.error || 'Failed'}</span>`;
-                    }
+    const progressDiv = document.getElementById('proxy-test-progress');
+    const bar = document.getElementById('proxy-test-bar');
+    const percentText = document.getElementById('proxy-test-percent');
+    const statusText = document.getElementById('proxy-test-status-text');
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing...'; }
+    progressDiv.style.display = 'block';
+    bar.style.width = '0%';
+    percentText.textContent = '0%';
+
+    const listResp = await authenticatedFetch('/api/proxy-lines');
+    const listData = await listResp.json();
+    const proxies = listData.proxy_lines || [];
+    const total = proxies.length;
+    let completed = 0;
+    const results = [];
+
+    for (const proxy of proxies) {
+        statusText.textContent = 'Testing: ' + proxy.name;
+        try {
+            const r = await authenticatedFetch('/api/proxy-lines/' + proxy.id + '/test', { method: 'POST' });
+            const d = await r.json();
+            results.push({ id: proxy.id, ok: d.ok, latency_ms: d.latency_ms, error: d.error });
+            const rowStatus = document.getElementById('proxy-status-' + proxy.id);
+            if (rowStatus) {
+                if (d.ok) {
+                    rowStatus.innerHTML = '<span style="color:var(--green)">\u2705 ' + d.latency_ms + 'ms</span>';
+                } else {
+                    rowStatus.innerHTML = '<span style="color:var(--red)">\u274c ' + (d.error || 'Failed') + '</span>';
                 }
-            });
-            const tbody = document.getElementById('proxy-lines-tbody');
-            const rows = Array.from(tbody.querySelectorAll('tr'));
-            rows.sort((a, b) => {
-                const idA = parseInt(a.id.replace('proxy-row-', ''));
-                const idB = parseInt(b.id.replace('proxy-row-', ''));
-                const resA = resultMap.get(idA) || {};
-                const resB = resultMap.get(idB) || {};
-                const latA = resA.ok ? resA.latency_ms : Infinity;
-                const latB = resB.ok ? resB.latency_ms : Infinity;
-                return latA - latB;
-            });
-            rows.forEach(row => tbody.appendChild(row));
+            }
+        } catch (e) {
+            results.push({ id: proxy.id, ok: false, error: 'Request failed' });
+            const rowStatus = document.getElementById('proxy-status-' + proxy.id);
+            if (rowStatus) rowStatus.innerHTML = '<span style="color:var(--red)">\u274c Error</span>';
         }
-        toast('All proxies tested');
-    } catch(e) {
-        toast('Test all failed', true);
+        completed++;
+        const pct = Math.round((completed / total) * 100);
+        bar.style.width = pct + '%';
+        percentText.textContent = pct + '%';
     }
-    if (btn) { 
-        btn.disabled = false;
-        btn.textContent = 'Test All';
-    }
+
+    const tbody = document.getElementById('proxy-lines-tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+        const idA = parseInt(a.id.replace('proxy-row-', ''));
+        const idB = parseInt(b.id.replace('proxy-row-', ''));
+        const resA = results.find(function(r) { return r.id === idA; }) || {};
+        const resB = results.find(function(r) { return r.id === idB; }) || {};
+        const latA = resA.ok ? resA.latency_ms : Infinity;
+        const latB = resB.ok ? resB.latency_ms : Infinity;
+        return latA - latB;
+    });
+    rows.forEach(function(row) { tbody.appendChild(row); });
+
+    statusText.textContent = 'Testing completed';
+    setTimeout(function() { progressDiv.style.display = 'none'; }, 3000);
+    if (btn) { btn.disabled = false; btn.textContent = 'Test All'; }
+    toast('All proxies tested');
 }
 
 async function refreshProxyFlagsAndOptions(context) {
