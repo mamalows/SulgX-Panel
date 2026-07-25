@@ -9592,7 +9592,11 @@ async function loadStats() {
     updChart();
     updDoughnutChart();
   } catch (err) {
-    console.error('loadStats error:', err);
+    if (err.message === 'Unauthorized') {
+      showLogin();
+    } else {
+      console.error('loadStats error:', err);
+    }
   }
 }
 function formatSpeed(bps){if(bps<1024)return bps.toFixed(1)+' B/s';const kbps=bps/1024;if(kbps<1024)return kbps.toFixed(1)+' KB/s';const mbps=kbps/1024;return mbps.toFixed(2)+' MB/s';}
