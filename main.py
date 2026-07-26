@@ -8379,10 +8379,17 @@ example.com"></textarea>
     <div class="fg"><label class="fl" data-en="Active" data-fa="فعال">Active</label><div class="toggle on" id="proxy-active" onclick="this.classList.toggle('on')"></div></div>
     <div class="fg">
       <label class="fl" data-en="Bulk Import (one per line)" data-fa="افزودن گروهی (هر خط یک)">Bulk Import</label>
-      <textarea class="fi" id="proxy-bulk" rows="4" placeholder="ip:port:user:pass
-ip:port:user
+      <textarea class="fi" id="proxy-bulk" rows="4" placeholder="ip:port@user:pass
+ip:port:user:pass
 ip:port
 host:port@user:pass"></textarea>
+      <div class="fg" style="margin-top:6px;">
+        <label class="fl" data-en="Default Type (for lines without prefix)" data-fa="نوع پیش‌فرض (برای خطوط بدون پیشوند)">Default Type</label>
+        <select class="fs" id="proxy-default-type">
+          <option value="socks5" selected>SOCKS5</option>
+          <option value="http">HTTP</option>
+        </select>
+      </div>
       <button class="btn btn-outline btn-sm" onclick="importProxiesBulk()" data-en="Add All" data-fa="افزودن همه">Add All</button>
     </div>
     <button class="btn btn-primary" onclick="saveProxy()" style="width:100%; margin-top:10px;" data-en="Save" data-fa="ذخیره">Save</button>
@@ -11070,8 +11077,9 @@ async function importProxiesBulk() {
     if (!raw) return toast('No data', true);
     const lines = raw.split('\n').map(l => l.trim()).filter(l => l);
     const proxies = [];
+    const defaultType = $m('proxy-default-type').value || 'socks5';
     for (const line of lines) {
-        let host = '', port = 1080, user = '', pass = '', type = 'socks5';
+        let host = '', port = 1080, user = '', pass = '', type = defaultType;
         let cleanLine = line;
         if (cleanLine.includes('://')) {
             const urlPart = cleanLine.split('://')[1];
@@ -11081,8 +11089,8 @@ async function importProxiesBulk() {
         }
         if (cleanLine.includes('@')) {
             const atIdx = cleanLine.lastIndexOf('@');
-            const hostPart = cleanLine.substring(atIdx + 1);
-            const authPart = cleanLine.substring(0, atIdx);
+            const hostPart = cleanLine.substring(0, atIdx);
+            const authPart = cleanLine.substring(atIdx + 1);
             const authParts = authPart.split(':');
             user = authParts[0] || '';
             pass = authParts.slice(1).join(':') || '';
