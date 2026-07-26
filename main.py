@@ -9190,7 +9190,6 @@ function renderLinks(links) {
           <td data-label="Conns">${cc}/${mc2 || '∞'}</td>
           <td data-label="Expiry" style="color:${ec}">${ex}</td>
           <td data-label="Status"><span class="tag ${l.active ? 'tag-on' : 'tag-off'}">${l.active ? t('on') : t('off')}</span></td>
-          <td data-label="UDP"><span class="tag ${udpEnabled ? 'tag-on' : 'tag-off'}">${udpEnabled ? 'On' : 'Off'}</span></td>
           <td data-label="Actions" style="min-width:140px;">
             <div style="display:flex; flex-direction:column; gap:6px; align-items:center;">
               <button class="toggle ${l.active ? 'on' : ''}" data-uid="${esc(l.uuid)}" onclick="togLink(this)"></button>
