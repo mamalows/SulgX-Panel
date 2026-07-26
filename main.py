@@ -11598,23 +11598,12 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
             "tag": "dns"
         }
 
-    outbounds_list = [outbound]
-    outbounds_list.append({"protocol": "dns", "settings": {"nonIPQuery": "reject"}, "tag": "dns-out"})
-    outbounds_list.append({"protocol": "freedom", "settings": {"domainStrategy": "UseIP"}, "tag": "direct"})
-    outbounds_list.append({"protocol": "blackhole", "settings": {"response": {"type": "http"}}, "tag": "block"})
-
-    if proxy_line and proxy_line.get("is_active"):
-        proxy_out = {
-            "protocol": proxy_line.get("type", "socks").lower(),
-            "settings": {"servers": [{"address": proxy_line["host"], "port": int(proxy_line["port"])}]},
-            "tag": "proxy-line-out"
-        }
-        if proxy_line.get("username") and proxy_line.get("password"):
-            proxy_out["settings"]["servers"][0]["users"] = [{"user": proxy_line["username"], "pass": proxy_line["password"]}]
-        outbounds_list.append(proxy_out)
-        if "sockopt" not in outbound["streamSettings"]:
-            outbound["streamSettings"]["sockopt"] = {}
-        outbound["streamSettings"]["sockopt"]["dialerProxy"] = "proxy-line-out"
+    outbounds_list = [
+        outbound,
+        {"protocol": "dns", "settings": {"nonIPQuery": "reject"}, "tag": "dns-out"},
+        {"protocol": "freedom", "settings": {"domainStrategy": "UseIP"}, "tag": "direct"},
+        {"protocol": "blackhole", "settings": {"response": {"type": "http"}}, "tag": "block"}
+    ]
 
     config = {
         "remarks": f"SulgX - {link['label']} ({address})",
@@ -11674,15 +11663,6 @@ async def xray_balancer_config(uid: str, request: Request):
     if not link or not link["active"]:
         raise HTTPException(status_code=404, detail="Link not found or disabled")
     link = dict(link)
-
-    proxy_line = None
-    if link.get("proxy_line_id"):
-        proxy_row = await db_fetchone(
-            "SELECT * FROM proxy_lines WHERE id = ?",
-            "SELECT * FROM proxy_lines WHERE id = $1",
-            (link["proxy_line_id"],)
-        )
-        proxy_line = dict(proxy_row) if proxy_row else None
 
     ip_profile_id = link.get("ip_profile_id")
     addresses = []
@@ -11816,21 +11796,6 @@ async def xray_balancer_config(uid: str, request: Request):
         }
     }
 
-    if proxy_line and proxy_line.get("is_active"):
-        proxy_out = {
-            "protocol": proxy_line.get("type", "socks").lower(),
-            "settings": {"servers": [{"address": proxy_line["host"], "port": int(proxy_line["port"])}]},
-            "tag": "proxy-line-out"
-        }
-        if proxy_line.get("username") and proxy_line.get("password"):
-            proxy_out["settings"]["servers"][0]["users"] = [{"user": proxy_line["username"], "pass": proxy_line["password"]}]
-        config["outbounds"].append(proxy_out)
-        for ob in config["outbounds"]:
-            if ob["protocol"] == "vless":
-                if "sockopt" not in ob["streamSettings"]:
-                    ob["streamSettings"]["sockopt"] = {}
-                ob["streamSettings"]["sockopt"]["dialerProxy"] = "proxy-line-out"
-
     config["policy"] = {
         "levels": {
             "0": {
@@ -11858,15 +11823,6 @@ async def xray_config(uid: str, request: Request):
         raise HTTPException(status_code=404, detail="Link not found or disabled")
     link = dict(link)
 
-    proxy_line = None
-    if link.get("proxy_line_id"):
-        proxy_row = await db_fetchone(
-            "SELECT * FROM proxy_lines WHERE id = ?",
-            "SELECT * FROM proxy_lines WHERE id = $1",
-            (link["proxy_line_id"],)
-        )
-        proxy_line = dict(proxy_row) if proxy_row else None
-
     ip_profile_id = link.get("ip_profile_id")
     addresses = []
     if ip_profile_id:
@@ -11888,10 +11844,10 @@ async def xray_config(uid: str, request: Request):
 
     configs = []
     for addr in addresses:
-        configs.append(build_xray_config(link, proxy_line, request, addr))
+        configs.append(build_xray_config(link, None, request, addr))
 
     if not configs:
-        configs.append(build_xray_config(link, proxy_line, request, get_domain(request)))
+        configs.append(build_xray_config(link, None, request, get_domain(request)))
 
     return JSONResponse(content=configs)
 
