@@ -11455,6 +11455,9 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
     if not fingerprint or fingerprint.lower() == "none":
         fingerprint = "chrome"
     allow_insecure = bool(link.get("allow_insecure", False))
+    alpn = link.get("alpn", "").strip()
+    if not alpn:
+        alpn = None
 
     stream_settings = {
         "network": network_type,
@@ -11476,11 +11479,23 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
         "fingerprint": fingerprint,
         "allowInsecure": allow_insecure
     }
+    if alpn:
+        tls_settings["alpn"] = [alpn]
     if link.get("ech_enabled") and link.get("ech_sni"):
         tls_settings["ech"] = {"enable": True, "sni": link["ech_sni"]}
         if link.get("ech_doh"):
             tls_settings["ech"]["doh"] = link["ech_doh"]
     stream_settings["tlsSettings"] = tls_settings
+
+    stream_settings["sockopt"] = {
+        "domainStrategy": "UseIP",
+        "happyEyeballs": {
+            "tryDelayMs": 250,
+            "prioritizeIPv6": False,
+            "interleave": 2,
+            "maxConcurrentTry": 4
+        }
+    }
 
     if link.get("fragment"):
         frag = link["fragment"]
@@ -11522,6 +11537,7 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
 
     config = {
         "remarks": f"SulgX - {link['label']} ({address})",
+        "version": {"min": "25.10.15"},
         "log": {"loglevel": "warning"},
         "inbounds": [
             {
@@ -11530,7 +11546,7 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
                 "protocol": "socks",
                 "settings": {"auth": "noauth", "udp": True},
                 "sniffing": {
-                    "destOverride": ["http", "tls", "quic"],
+                    "destOverride": ["http", "tls"],
                     "enabled": True,
                     "routeOnly": True
                 },
@@ -11557,8 +11573,6 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
         if proxy_line.get("username") and proxy_line.get("password"):
             proxy_out["settings"]["servers"][0]["users"] = [{"user": proxy_line["username"], "pass": proxy_line["password"]}]
         config["outbounds"].append(proxy_out)
-        if "sockopt" not in outbound["streamSettings"]:
-            outbound["streamSettings"]["sockopt"] = {}
         outbound["streamSettings"]["sockopt"]["dialerProxy"] = "proxy-line-out"
 
     dns_mode = link.get("xray_dns_mode", "doh")
@@ -11590,8 +11604,8 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
         rules.append({"domain": ["geosite:ru"], "outboundTag": "direct", "type": "field"})
         rules.append({"ip": ["geoip:ru"], "outboundTag": "direct", "type": "field"})
 
+    rules.append({"network": "udp", "outboundTag": "block", "type": "field"})
     rules.append({"network": "tcp", "outboundTag": "proxy", "type": "field"})
-    rules.append({"network": "udp", "outboundTag": "proxy", "type": "field"})
 
     config["routing"]["rules"] = rules
 
@@ -11705,6 +11719,9 @@ async def xray_balancer_config(uid: str, request: Request):
     if not fingerprint or fingerprint.lower() == "none":
         fingerprint = "chrome"
     allow_insecure = bool(link.get("allow_insecure", False))
+    alpn = link.get("alpn", "").strip()
+    if not alpn:
+        alpn = None
 
     stream_settings = {
         "network": "ws" if link.get("protocol", "vless-ws") == "vless-ws" else "xhttp",
@@ -11730,11 +11747,23 @@ async def xray_balancer_config(uid: str, request: Request):
         "fingerprint": fingerprint,
         "allowInsecure": allow_insecure
     }
+    if alpn:
+        tls_settings["alpn"] = [alpn]
     if link.get("ech_enabled") and link.get("ech_sni"):
         tls_settings["ech"] = {"enable": True, "sni": link["ech_sni"]}
         if link.get("ech_doh"):
             tls_settings["ech"]["doh"] = link["ech_doh"]
     stream_settings["tlsSettings"] = tls_settings
+
+    stream_settings["sockopt"] = {
+        "domainStrategy": "UseIP",
+        "happyEyeballs": {
+            "tryDelayMs": 250,
+            "prioritizeIPv6": False,
+            "interleave": 2,
+            "maxConcurrentTry": 4
+        }
+    }
 
     outbounds = []
     proxy_tags = []
@@ -11753,6 +11782,7 @@ async def xray_balancer_config(uid: str, request: Request):
 
     config = {
         "remarks": f"SulgX - {link['label']} (Balancer)",
+        "version": {"min": "25.10.15"},
         "log": {"loglevel": "warning"},
         "inbounds": [
             {
@@ -11761,7 +11791,7 @@ async def xray_balancer_config(uid: str, request: Request):
                 "protocol": "socks",
                 "settings": {"auth": "noauth", "udp": True},
                 "sniffing": {
-                    "destOverride": ["http", "tls", "quic"],
+                    "destOverride": ["http", "tls"],
                     "enabled": True,
                     "routeOnly": True
                 },
@@ -11778,8 +11808,8 @@ async def xray_balancer_config(uid: str, request: Request):
             "rules": [
                 {"domain": ["geosite:private"], "outboundTag": "direct", "type": "field"},
                 {"ip": ["geoip:private"], "outboundTag": "direct", "type": "field"},
-                {"network": "tcp", "balancerTag": "balancer", "type": "field"},
-                {"network": "udp", "balancerTag": "balancer", "type": "field"}
+                {"network": "udp", "outboundTag": "block", "type": "field"},
+                {"network": "tcp", "balancerTag": "balancer", "type": "field"}
             ]
         }
     }
@@ -11793,6 +11823,9 @@ async def xray_balancer_config(uid: str, request: Request):
         if proxy_line.get("username") and proxy_line.get("password"):
             proxy_out["settings"]["servers"][0]["users"] = [{"user": proxy_line["username"], "pass": proxy_line["password"]}]
         config["outbounds"].append(proxy_out)
+        for ob in config["outbounds"]:
+            if ob["protocol"] == "vless":
+                ob["streamSettings"]["sockopt"]["dialerProxy"] = "proxy-line-out"
 
     config["policy"] = {
         "levels": {
