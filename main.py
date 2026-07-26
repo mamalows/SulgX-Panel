@@ -11477,7 +11477,7 @@ async def test_all_proxy_lines(_=Depends(require_auth)):
         await asyncio.sleep(1.5)
     return {"results": results}
 
-ddef build_xray_config(link: dict, proxy_line: dict, request: Request, address: str) -> dict:
+def build_xray_config(link: dict, proxy_line: dict, request: Request, address: str) -> dict:
     uid = link["uid"]
     domain = get_domain(request)
     port = link.get("port", 443)
