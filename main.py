@@ -3102,6 +3102,7 @@ async def list_links(request: Request, _=Depends(require_auth)):
     result = []
     for row in items:
         uid = row["uid"]
+        allow_insecure = bool(row.get("allow_insecure", False))
         extra = {
             "custom_path": row.get("custom_path", ""),
             "custom_sni": row.get("custom_sni", ""),
@@ -3115,7 +3116,7 @@ async def list_links(request: Request, _=Depends(require_auth)):
             "fragment_mode": row.get("fragment_mode", "off"),
             "fragment_length": row.get("fragment_length", "100-200"),
             "fragment_interval": row.get("fragment_interval", "10-20"),
-            "allow_insecure": bool(row.get("allow_insecure", False)),
+            "allow_insecure": allow_insecure,
             "random_path": row.get("random_path", False),
             "enable_ipv6": row.get("enable_ipv6", True),
             "smux_enabled": row.get("smux_enabled", False),
@@ -3152,7 +3153,7 @@ async def list_links(request: Request, _=Depends(require_auth)):
             "fragment_mode": extra["fragment_mode"],
             "fragment_length": extra["fragment_length"],
             "fragment_interval": extra["fragment_interval"],
-            "allow_insecure": extra["allow_insecure"],
+            "allow_insecure": allow_insecure,
             "random_path": bool(extra["random_path"]),
             "enable_ipv6": bool(extra["enable_ipv6"]),
             "smux_enabled": bool(extra["smux_enabled"]),
@@ -4477,7 +4478,7 @@ async def user_subscription(uid: str, request: Request):
         "fragment_mode": link.get("fragment_mode", "off"),
         "fragment_length": link.get("fragment_length", "100-200"),
         "fragment_interval": link.get("fragment_interval", "10-20"),
-        "allow_insecure": bool(link.get("allow_insecure", False)),
+        "allow_insecure": allow_insecure,
         "random_path": link.get("random_path", False),
         "enable_ipv6": link.get("enable_ipv6", True),
         "smux_enabled": link.get("smux_enabled", False),
@@ -7562,7 +7563,7 @@ textarea.fi { resize: vertical; min-height: 130px; }
           <text x="90" y="58" font-family="'Orbitron',sans-serif" font-size="40" font-weight="900" fill="var(--primary)" text-anchor="middle">SulgX</text>
         </svg>
         <div style="font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:900;color:var(--primary);margin-top:12px;display:flex;align-items:center;justify-content:center;gap:8px;">
-          SulgX Panel <span style="font-size:0.8rem; font-family:'Inter'; color:var(--bg); background:var(--primary); padding:2px 6px; border-radius:4px;">V 1.5.5</span>
+          SulgX Panel <span style="font-size:0.8rem; font-family:'Inter'; color:var(--bg); background:var(--primary); padding:2px 6px; border-radius:4px;">V 1.5.6</span>
         </div>
         <div style="font-size:1rem;color:var(--text3);margin-top:8px;" data-en="Enter your password" data-fa="رمز عبور را وارد کنید">Enter your password</div>
         <div id="login-custom-message" style="margin-top:20px; text-align:center; color:var(--text3); font-size:0.9rem;"></div>
@@ -7585,7 +7586,7 @@ textarea.fi { resize: vertical; min-height: 130px; }
   <header class="header">
     <div class="header-inner">
       <div style="display:flex;align-items:center;gap:16px;">
-        <span class="logo">SulgX</span><span class="version-tag">v1.5.5</span>
+        <span class="logo">SulgX</span><span class="version-tag">v1.5.6</span>
         <span id="panel-clock" style="font-weight:600;color:var(--primary);margin-left:8px;font-size:0.9rem;"></span>
         <nav class="header-nav" id="mainNav">
           <button class="nav-link active" data-page="dashboard">
@@ -11454,6 +11455,7 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
     fingerprint = link.get("fingerprint") or link.get("custom_fp") or "chrome"
     if not fingerprint or fingerprint.lower() == "none":
         fingerprint = "chrome"
+
     allow_insecure = bool(link.get("allow_insecure", False))
     alpn = link.get("alpn", "").strip()
     if not alpn:
@@ -11573,6 +11575,8 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
         if proxy_line.get("username") and proxy_line.get("password"):
             proxy_out["settings"]["servers"][0]["users"] = [{"user": proxy_line["username"], "pass": proxy_line["password"]}]
         config["outbounds"].append(proxy_out)
+        if "sockopt" not in outbound["streamSettings"]:
+            outbound["streamSettings"]["sockopt"] = {}
         outbound["streamSettings"]["sockopt"]["dialerProxy"] = "proxy-line-out"
 
     dns_mode = link.get("xray_dns_mode", "doh")
