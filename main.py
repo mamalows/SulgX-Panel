@@ -2105,54 +2105,54 @@ async def perform_proxy_test(proxy_row):
         )
         return {"id": proxy_id, "ok": False, "error": "Unsupported proxy type", "latency_ms": None, "status_code": None}
 
-    try:
-        start = time.time()
-        auth_str = ""
-        if username and password:
-            safe_user = quote(username)
-            safe_pass = quote(password)
-            auth_str = f"{safe_user}:{safe_pass}@"
-        proxy_url = f"{proxy_type}://{auth_str}{proxy_host}:{proxy_port}"
-        proxy = Proxy.from_url(proxy_url)
-        sock = await asyncio.wait_for(
-            proxy.connect(dest_host="httpbin.org", dest_port=80),
-            timeout=8.0
-        )
-        reader, writer = await asyncio.open_connection(sock=sock)
-        writer.write(b"GET /ip HTTP/1.0\r\nHost: httpbin.org\r\n\r\n")
-        await writer.drain()
-        response = await asyncio.wait_for(reader.read(500), timeout=5.0)
-        writer.close()
-        await writer.wait_closed()
-        latency = round((time.time() - start) * 1000)
-        if b'"origin"' in response:
-            await db_execute(
-                "UPDATE proxy_lines SET last_test_status = 'ok', last_latency_ms = ? WHERE id = ?",
-                "UPDATE proxy_lines SET last_test_status = 'ok', last_latency_ms = $1 WHERE id = $2",
-                (latency, proxy_id)
+    test_targets = [
+        ("httpbin.org", 80, b"GET /ip HTTP/1.0\r\nHost: httpbin.org\r\n\r\n", b'"origin"'),
+        ("detectportal.firefox.com", 80, b"GET /success.txt HTTP/1.0\r\nHost: detectportal.firefox.com\r\n\r\n", b"success"),
+    ]
+
+    last_error = "No target succeeded"
+    for host, port, request_bytes, expected_fragment in test_targets:
+        try:
+            start = time.time()
+            auth_str = ""
+            if username and password:
+                safe_user = quote(username)
+                safe_pass = quote(password)
+                auth_str = f"{safe_user}:{safe_pass}@"
+            proxy_url = f"{proxy_type}://{auth_str}{proxy_host}:{proxy_port}"
+            proxy = Proxy.from_url(proxy_url)
+            sock = await asyncio.wait_for(
+                proxy.connect(dest_host=host, dest_port=port),
+                timeout=8.0
             )
-            return {"id": proxy_id, "ok": True, "latency_ms": latency, "status_code": 200}
-        else:
-            await db_execute(
-                "UPDATE proxy_lines SET last_test_status = 'invalid_response', last_latency_ms = ? WHERE id = ?",
-                "UPDATE proxy_lines SET last_test_status = 'invalid_response', last_latency_ms = $1 WHERE id = $2",
-                (latency, proxy_id)
-            )
-            return {"id": proxy_id, "ok": False, "error": "Invalid response", "latency_ms": latency, "status_code": 502}
-    except asyncio.TimeoutError:
-        await db_execute(
-            "UPDATE proxy_lines SET last_test_status = 'timeout', last_latency_ms = NULL WHERE id = ?",
-            "UPDATE proxy_lines SET last_test_status = 'timeout', last_latency_ms = NULL WHERE id = $1",
-            (proxy_id,)
-        )
-        return {"id": proxy_id, "ok": False, "error": "Connection timed out", "latency_ms": None, "status_code": None}
-    except Exception as e:
-        await db_execute(
-            "UPDATE proxy_lines SET last_test_status = 'error', last_latency_ms = NULL WHERE id = ?",
-            "UPDATE proxy_lines SET last_test_status = 'error', last_latency_ms = NULL WHERE id = $1",
-            (proxy_id,)
-        )
-        return {"id": proxy_id, "ok": False, "error": str(e), "latency_ms": None, "status_code": None}
+            reader, writer = await asyncio.open_connection(sock=sock)
+            writer.write(request_bytes)
+            await writer.drain()
+            response = await asyncio.wait_for(reader.read(500), timeout=5.0)
+            writer.close()
+            await writer.wait_closed()
+            latency = round((time.time() - start) * 1000)
+
+            if expected_fragment in response:
+                await db_execute(
+                    "UPDATE proxy_lines SET last_test_status = 'ok', last_latency_ms = ? WHERE id = ?",
+                    "UPDATE proxy_lines SET last_test_status = 'ok', last_latency_ms = $1 WHERE id = $2",
+                    (latency, proxy_id)
+                )
+                return {"id": proxy_id, "ok": True, "latency_ms": latency, "status_code": 200}
+            else:
+                last_error = f"Unexpected response from {host}:{port}"
+        except asyncio.TimeoutError:
+            last_error = f"Timeout connecting to {host}:{port}"
+        except Exception as e:
+            last_error = f"Error connecting to {host}:{port}: {e}"
+
+    await db_execute(
+        "UPDATE proxy_lines SET last_test_status = 'error', last_latency_ms = NULL WHERE id = ?",
+        "UPDATE proxy_lines SET last_test_status = 'error', last_latency_ms = NULL WHERE id = $1",
+        (proxy_id,)
+    )
+    return {"id": proxy_id, "ok": False, "error": last_error, "latency_ms": None, "status_code": None}
 
 
 @app.post("/api/proxy-lines/{pid}/test")
