@@ -11565,20 +11565,21 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
     ]
 
     if bypass_iran:
-        rules.insert(-2, {"domain": ["geosite:ir"], "outboundTag": "direct", "type": "field"})
-        rules.insert(-2, {"ip": ["geoip:ir"], "outboundTag": "direct", "type": "field"})
+        rules.append({"domain": ["geosite:ir"], "outboundTag": "direct", "type": "field"})
+        rules.append({"ip": ["geoip:ir"], "outboundTag": "direct", "type": "field"})
     if bypass_china:
-        rules.insert(-2, {"domain": ["geosite:cn"], "outboundTag": "direct", "type": "field"})
-        rules.insert(-2, {"ip": ["geoip:cn"], "outboundTag": "direct", "type": "field"})
+        rules.append({"domain": ["geosite:cn"], "outboundTag": "direct", "type": "field"})
+        rules.append({"ip": ["geoip:cn"], "outboundTag": "direct", "type": "field"})
     if bypass_russia:
-        rules.insert(-2, {"domain": ["geosite:ru"], "outboundTag": "direct", "type": "field"})
-        rules.insert(-2, {"ip": ["geoip:ru"], "outboundTag": "direct", "type": "field"})
+        rules.append({"domain": ["geosite:ru"], "outboundTag": "direct", "type": "field"})
+        rules.append({"ip": ["geoip:ru"], "outboundTag": "direct", "type": "field"})
+
     if allowed_domains:
         for d in allowed_domains:
             if d.startswith("*."):
-                rules.insert(-2, {"domain": [f"domain:{d[2:]}"], "outboundTag": "proxy", "type": "field"})
+                rules.append({"domain": [f"domain:{d[2:]}"], "outboundTag": "proxy", "type": "field"})
             else:
-                rules.insert(-2, {"domain": [f"full:{d}"], "outboundTag": "proxy", "type": "field"})
+                rules.append({"domain": [f"full:{d}"], "outboundTag": "proxy", "type": "field"})
 
     rules.append({"network": "udp", "outboundTag": "block", "type": "field"})
     rules.append({"network": "tcp", "outboundTag": "proxy", "type": "field"})
