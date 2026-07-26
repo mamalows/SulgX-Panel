@@ -11547,10 +11547,79 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
         "tag": "proxy"
     }
 
+    dns_mode = link.get("xray_dns_mode", "doh")
+    allowed_domains_str = link.get("xray_allowed_domains", "")
+    allowed_domains = [d.strip() for d in allowed_domains_str.split(",") if d.strip()]
+
+    bypass_iran = bool(link.get("bypass_iran", True))
+    bypass_china = bool(link.get("bypass_china", False))
+    bypass_russia = bool(link.get("bypass_russia", False))
+
+    rules = [
+        {"inboundTag": ["mixed-in"], "port": 53, "outboundTag": "dns-out", "type": "field"},
+        {"inboundTag": ["dns-in"], "outboundTag": "dns-out", "type": "field"},
+        {"inboundTag": ["remote-dns"], "outboundTag": "proxy", "type": "field"},
+        {"inboundTag": ["dns"], "outboundTag": "direct", "type": "field"},
+        {"domain": ["geosite:private"], "outboundTag": "direct", "type": "field"},
+        {"ip": ["geoip:private"], "outboundTag": "direct", "type": "field"}
+    ]
+
+    if bypass_iran:
+        rules.insert(-2, {"domain": ["geosite:ir"], "outboundTag": "direct", "type": "field"})
+        rules.insert(-2, {"ip": ["geoip:ir"], "outboundTag": "direct", "type": "field"})
+    if bypass_china:
+        rules.insert(-2, {"domain": ["geosite:cn"], "outboundTag": "direct", "type": "field"})
+        rules.insert(-2, {"ip": ["geoip:cn"], "outboundTag": "direct", "type": "field"})
+    if bypass_russia:
+        rules.insert(-2, {"domain": ["geosite:ru"], "outboundTag": "direct", "type": "field"})
+        rules.insert(-2, {"ip": ["geoip:ru"], "outboundTag": "direct", "type": "field"})
+    if allowed_domains:
+        for d in allowed_domains:
+            if d.startswith("*."):
+                rules.insert(-2, {"domain": [f"domain:{d[2:]}"], "outboundTag": "proxy", "type": "field"})
+            else:
+                rules.insert(-2, {"domain": [f"full:{d}"], "outboundTag": "proxy", "type": "field"})
+
+    rules.append({"network": "udp", "outboundTag": "block", "type": "field"})
+    rules.append({"network": "tcp", "outboundTag": "proxy", "type": "field"})
+
+    if dns_mode == "doh":
+        doh_url = link.get("xray_doh_url") or DOH_UPSTREAMS[0] if DOH_UPSTREAMS else "https://cloudflare-dns.com/dns-query"
+        dns_config = {
+            "servers": [{"address": doh_url, "tag": "remote-dns"}],
+            "queryStrategy": "UseIP",
+            "tag": "dns"
+        }
+    else:
+        dns_config = {
+            "servers": [{"address": "fakedns", "tag": "remote-dns"}],
+            "queryStrategy": "UseIP",
+            "tag": "dns"
+        }
+
+    outbounds_list = [outbound]
+    outbounds_list.append({"protocol": "dns", "settings": {"nonIPQuery": "reject"}, "tag": "dns-out"})
+    outbounds_list.append({"protocol": "freedom", "settings": {"domainStrategy": "UseIP"}, "tag": "direct"})
+    outbounds_list.append({"protocol": "blackhole", "settings": {"response": {"type": "http"}}, "tag": "block"})
+
+    if proxy_line and proxy_line.get("is_active"):
+        proxy_out = {
+            "protocol": proxy_line.get("type", "socks").lower(),
+            "settings": {"servers": [{"address": proxy_line["host"], "port": int(proxy_line["port"])}]},
+            "tag": "proxy-line-out"
+        }
+        if proxy_line.get("username") and proxy_line.get("password"):
+            proxy_out["settings"]["servers"][0]["users"] = [{"user": proxy_line["username"], "pass": proxy_line["password"]}]
+        outbounds_list.append(proxy_out)
+        if "sockopt" not in outbound["streamSettings"]:
+            outbound["streamSettings"]["sockopt"] = {}
+        outbound["streamSettings"]["sockopt"]["dialerProxy"] = "proxy-line-out"
+
     config = {
         "remarks": f"SulgX - {link['label']} ({address})",
         "version": {"min": "25.10.15"},
         "log": {"loglevel": "warning"},
+        "dns": dns_config,
         "inbounds": [
             {
                 "listen": "127.0.0.1",
@@ -11563,123 +11632,36 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
                     "routeOnly": True
                 },
                 "tag": "mixed-in"
+            },
+            {
+                "listen": "127.0.0.1",
+                "port": 10853,
+                "protocol": "dokodemo-door",
+                "settings": {"address": "1.1.1.1", "network": "tcp,udp", "port": 53},
+                "tag": "dns-in"
             }
         ],
-        "outbounds": [
-            outbound,
-            {"protocol": "freedom", "settings": {"domainStrategy": "UseIP"}, "tag": "direct"},
-            {"protocol": "blackhole", "settings": {"response": {"type": "http"}}, "tag": "block"}
-        ],
+        "outbounds": outbounds_list,
         "routing": {
             "domainStrategy": "IPIfNonMatch",
-            "rules": []
-        }
-    }
-
-    if proxy_line and proxy_line.get("is_active"):
-        proxy_out = {
-            "protocol": proxy_line.get("type", "socks").lower(),
-            "settings": {"servers": [{"address": proxy_line["host"], "port": int(proxy_line["port"])}]},
-            "tag": "proxy-line-out"
-        }
-        if proxy_line.get("username") and proxy_line.get("password"):
-            proxy_out["settings"]["servers"][0]["users"] = [{"user": proxy_line["username"], "pass": proxy_line["password"]}]
-        config["outbounds"].append(proxy_out)
-        if "sockopt" not in outbound["streamSettings"]:
-            outbound["streamSettings"]["sockopt"] = {}
-        outbound["streamSettings"]["sockopt"]["dialerProxy"] = "proxy-line-out"
-
-    dns_mode = link.get("xray_dns_mode", "doh")
-    allowed_domains_str = link.get("xray_allowed_domains", "")
-    allowed_domains = [d.strip() for d in allowed_domains_str.split(",") if d.strip()]
-
-    bypass_iran = bool(link.get("bypass_iran", True))
-    bypass_china = bool(link.get("bypass_china", False))
-    bypass_russia = bool(link.get("bypass_russia", False))
-
-    rules = []
-    if allowed_domains:
-        for d in allowed_domains:
-            if d.startswith("*."):
-                rules.append({"domain": [f"domain:{d[2:]}"], "outboundTag": "proxy", "type": "field"})
-            else:
-                rules.append({"domain": [f"full:{d}"], "outboundTag": "proxy", "type": "field"})
-
-    rules.append({"domain": ["geosite:private"], "outboundTag": "direct", "type": "field"})
-    rules.append({"ip": ["geoip:private"], "outboundTag": "direct", "type": "field"})
-
-    if bypass_iran:
-        rules.append({"domain": ["geosite:ir"], "outboundTag": "direct", "type": "field"})
-        rules.append({"ip": ["geoip:ir"], "outboundTag": "direct", "type": "field"})
-    if bypass_china:
-        rules.append({"domain": ["geosite:cn"], "outboundTag": "direct", "type": "field"})
-        rules.append({"ip": ["geoip:cn"], "outboundTag": "direct", "type": "field"})
-    if bypass_russia:
-        rules.append({"domain": ["geosite:ru"], "outboundTag": "direct", "type": "field"})
-        rules.append({"ip": ["geoip:ru"], "outboundTag": "direct", "type": "field"})
-
-    rules.append({"network": "udp", "outboundTag": "block", "type": "field"})
-    rules.append({"network": "tcp", "outboundTag": "proxy", "type": "field"})
-
-    config["routing"]["rules"] = rules
-
-    if dns_mode == "doh":
-        doh_url = link.get("xray_doh_url") or DOH_UPSTREAMS[0] if DOH_UPSTREAMS else "https://cloudflare-dns.com/dns-query"
-        config["dns"] = {
-            "servers": [{"address": doh_url, "tag": "remote-dns"}],
-            "queryStrategy": "UseIP",
-            "tag": "dns"
-        }
-        config["inbounds"].append({
-            "listen": "127.0.0.1",
-            "port": 10853,
-            "protocol": "dokodemo-door",
-            "settings": {"address": "1.1.1.1", "network": "tcp,udp", "port": 53},
-            "tag": "dns-in"
-        })
-        config["outbounds"].insert(1, {"protocol": "dns", "settings": {"nonIPQuery": "reject"}, "tag": "dns-out"})
-        dns_rules = [
-            {"inboundTag": ["dns-in"], "outboundTag": "dns-out", "type": "field"},
-            {"inboundTag": ["mixed-in"], "port": 53, "outboundTag": "dns-out", "type": "field"},
-            {"inboundTag": ["remote-dns"], "outboundTag": "proxy", "type": "field"}
-        ]
-        for rule in reversed(dns_rules):
-            config["routing"]["rules"].insert(0, rule)
-
-    elif dns_mode == "fakedns":
-        config["fakedns"] = [{"ipPool": "198.18.0.0/15", "poolSize": 65535}]
-        config["dns"] = {
-            "servers": [
-                {
-                    "address": "fakedns",
-                    "domains": allowed_domains if allowed_domains else ["domain:example.com"]
-                },
-                {
-                    "address": link.get("xray_doh_url") or "https://cloudflare-dns.com/dns-query",
-                    "tag": "remote-dns"
+            "rules": rules
+        },
+        "policy": {
+            "levels": {
+                "0": {
+                    "connIdle": 300,
+                    "handshake": 4,
+                    "uplinkOnly": 1,
+                    "downlinkOnly": 1
                 }
-            ],
-            "queryStrategy": "UseIP",
-            "tag": "dns"
-        }
-        config["inbounds"][0]["sniffing"]["routeOnly"] = False
-        config["inbounds"][0]["sniffing"]["destOverride"] = ["fakedns", "tls", "http", "quic"]
-
-    config["policy"] = {
-        "levels": {
-            "0": {
-                "connIdle": 300,
-                "handshake": 4,
-                "uplinkOnly": 1,
-                "downlinkOnly": 1
+            },
+            "system": {
+                "statsOutboundUplink": True,
+                "statsOutboundDownlink": True
             }
         },
-        "system": {
-            "statsOutboundUplink": True,
-            "statsOutboundDownlink": True
-        }
+        "stats": {}
     }
-    config["stats"] = {}
 
     return config
 
@@ -11798,6 +11780,11 @@ async def xray_balancer_config(uid: str, request: Request):
         "remarks": f"SulgX - {link['label']} (Balancer)",
         "version": {"min": "25.10.15"},
         "log": {"loglevel": "warning"},
+        "dns": {
+            "servers": [{"address": DOH_UPSTREAMS[0] if DOH_UPSTREAMS else "https://cloudflare-dns.com/dns-query", "tag": "remote-dns"}],
+            "queryStrategy": "UseIP",
+            "tag": "dns"
+        },
         "inbounds": [
             {
                 "listen": "127.0.0.1",
@@ -11839,6 +11826,8 @@ async def xray_balancer_config(uid: str, request: Request):
         config["outbounds"].append(proxy_out)
         for ob in config["outbounds"]:
             if ob["protocol"] == "vless":
+                if "sockopt" not in ob["streamSettings"]:
+                    ob["streamSettings"]["sockopt"] = {}
                 ob["streamSettings"]["sockopt"]["dialerProxy"] = "proxy-line-out"
 
     config["policy"] = {
