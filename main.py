@@ -9179,7 +9179,9 @@ function renderLinks(links) {
               mc2 = l.max_connections || 0,
               check = selectedUids.has(l.uuid) ? 'checked' : '',
               flagEmoji = l.flag ? codeToFlag(l.flag) : '',
-              labelDisplay = (flagEmoji ? flagEmoji + ' ' : '') + esc(l.label);
+              labelDisplay = (flagEmoji ? flagEmoji + ' ' : '') + esc(l.label),
+              udpEnabled = l.udp_enabled !== undefined ? l.udp_enabled : true;
+
         tableBuffer += `<tr>
           <td><input type="checkbox" value="${esc(l.uuid)}" ${check} onchange="toggleSelectUid('${esc(l.uuid)}')"></td>
           <td data-label="Name" style="font-weight:600">${labelDisplay}</td>
@@ -9188,6 +9190,7 @@ function renderLinks(links) {
           <td data-label="Conns">${cc}/${mc2 || '∞'}</td>
           <td data-label="Expiry" style="color:${ec}">${ex}</td>
           <td data-label="Status"><span class="tag ${l.active ? 'tag-on' : 'tag-off'}">${l.active ? t('on') : t('off')}</span></td>
+          <td data-label="UDP"><span class="tag ${udpEnabled ? 'tag-on' : 'tag-off'}">${udpEnabled ? 'On' : 'Off'}</span></td>
           <td data-label="Actions" style="min-width:140px;">
             <div style="display:flex; flex-direction:column; gap:6px; align-items:center;">
               <button class="toggle ${l.active ? 'on' : ''}" data-uid="${esc(l.uuid)}" onclick="togLink(this)"></button>
