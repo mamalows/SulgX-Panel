@@ -3088,6 +3088,14 @@ async def list_links(request: Request, _=Depends(require_auth)):
         items = list(LINKS.values())
     items.sort(key=lambda x: x["created_at"], reverse=True)
     domain = get_domain(request)
+
+    async with connections_lock:
+        conn_count_by_uuid = {}
+        for info in connections.values():
+            uid = info.get("uuid")
+            if uid:
+                conn_count_by_uuid[uid] = conn_count_by_uuid.get(uid, 0) + 1
+
     result = []
     for row in items:
         uid = row["uid"]
@@ -3104,7 +3112,7 @@ async def list_links(request: Request, _=Depends(require_auth)):
             "fragment_mode": row.get("fragment_mode", "off"),
             "fragment_length": row.get("fragment_length", "100-200"),
             "fragment_interval": row.get("fragment_interval", "10-20"),
-            "allow_insecure": row.get("allow_insecure", False),
+            "allow_insecure": bool(row.get("allow_insecure", False)),
             "random_path": row.get("random_path", False),
             "enable_ipv6": row.get("enable_ipv6", True),
             "smux_enabled": row.get("smux_enabled", False),
@@ -3132,7 +3140,7 @@ async def list_links(request: Request, _=Depends(require_auth)):
             "fragment": extra["fragment"],
             "ip_profile_id": row.get("ip_profile_id", ""),
             "naming_mode": row.get("naming_mode", "default"),
-            "current_connections": await count_connections_for_link(uid),
+            "current_connections": conn_count_by_uuid.get(uid, 0),
             "vless_link": generate_vless_link(uid, remark=f"SulgX-{row['label']}", extra=extra, server_domain=domain),
             "tfo": bool(extra["tfo"]),
             "ech_enabled": bool(extra["ech_enabled"]),
@@ -3141,7 +3149,7 @@ async def list_links(request: Request, _=Depends(require_auth)):
             "fragment_mode": extra["fragment_mode"],
             "fragment_length": extra["fragment_length"],
             "fragment_interval": extra["fragment_interval"],
-            "allow_insecure": bool(extra["allow_insecure"]),
+            "allow_insecure": extra["allow_insecure"],
             "random_path": bool(extra["random_path"]),
             "enable_ipv6": bool(extra["enable_ipv6"]),
             "smux_enabled": bool(extra["smux_enabled"]),
@@ -3160,11 +3168,13 @@ async def list_links(request: Request, _=Depends(require_auth)):
         })
     return {"links": result}
 
+
 @app.get("/api/export-links")
 async def export_links(_=Depends(require_auth)):
     async with LINKS_LOCK:
         links = list(LINKS.values())
     return JSONResponse(content=links)
+
 
 @app.post("/api/import-links")
 async def import_links(request: Request, _=Depends(require_auth)):
@@ -3258,6 +3268,7 @@ async def import_links(request: Request, _=Depends(require_auth)):
         imported += 1
     return {"ok": True, "imported": imported}
 
+
 @app.patch("/api/links/batch")
 async def batch_links(request: Request, _=Depends(require_auth)):
     body = await request.json()
@@ -3286,6 +3297,7 @@ async def batch_links(request: Request, _=Depends(require_auth)):
                 await close_connections_for_link(uid)
     return {"ok": True}
 
+
 @app.post("/api/links/{uid}/new-uuid")
 async def regenerate_uuid(uid: str, _=Depends(require_auth)):
     async with LINKS_LOCK:
@@ -3309,11 +3321,13 @@ async def regenerate_uuid(uid: str, _=Depends(require_auth)):
         log_event("Inbound", f"UUID regenerated for {link['label']}: {uid} -> {new_uid}")
         return {"new_uuid": new_uid}
 
+
 @app.post("/api/links/{uid}/disconnect")
 async def disconnect_link(uid: str, _=Depends(require_auth)):
     await close_connections_for_link(uid)
     log_event("Inbound", f"Disconnected all connections for {uid}")
     return {"ok": True}
+
 
 @app.patch("/api/links/{uid}")
 async def toggle_link(uid: str, request: Request, _=Depends(require_auth)):
@@ -4460,7 +4474,7 @@ async def user_subscription(uid: str, request: Request):
         "fragment_mode": link.get("fragment_mode", "off"),
         "fragment_length": link.get("fragment_length", "100-200"),
         "fragment_interval": link.get("fragment_interval", "10-20"),
-        "allow_insecure": link.get("allow_insecure", False),
+        "allow_insecure": bool(link.get("allow_insecure", False)),
         "random_path": link.get("random_path", False),
         "enable_ipv6": link.get("enable_ipv6", True),
         "smux_enabled": link.get("smux_enabled", False),
@@ -4550,7 +4564,7 @@ async def clash_subscription(uid: str, request: Request):
     ech_enabled = link.get("ech_enabled", False)
     ech_sni = link.get("ech_sni", "")
     ech_doh = link.get("ech_doh", "")
-    allow_insecure = link.get("allow_insecure", False)
+    allow_insecure = bool(link.get("allow_insecure", False))
     random_path = link.get("random_path", False)
     smux_enabled = link.get("smux_enabled", False)
     fingerprint = link.get("fingerprint") or link.get("custom_fp") or "chrome"
@@ -4658,6 +4672,10 @@ async def clash_subscription(uid: str, request: Request):
         {"name": "♻️ Auto", "type": "url-test", "proxies": proxy_names, "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50}
     ]
 
+    bypass_iran = bool(link.get("bypass_iran", True))
+    bypass_china = bool(link.get("bypass_china", False))
+    bypass_russia = bool(link.get("bypass_russia", False))
+
     rules = []
     if bypass_iran:
         rules.append("DOMAIN-SUFFIX,ir,DIRECT")
@@ -4676,9 +4694,6 @@ async def clash_subscription(uid: str, request: Request):
             else:
                 rules.append(f"DOMAIN,{d},🚀 Select")
     rules.append("MATCH,🚀 Select")
-    bypass_iran = bool(link.get("bypass_iran", True))
-    bypass_china = bool(link.get("bypass_china", False))
-    bypass_russia = bool(link.get("bypass_russia", False))
 
     dns_config = {
         "enable": True,
@@ -4775,7 +4790,7 @@ async def singbox_subscription(uid: str, request: Request):
     ech_enabled = link.get("ech_enabled", False)
     ech_sni = link.get("ech_sni", "")
     ech_doh = link.get("ech_doh", "")
-    allow_insecure = link.get("allow_insecure", False)
+    allow_insecure = bool(link.get("allow_insecure", False))
     random_path = link.get("random_path", False)
     smux_enabled = link.get("smux_enabled", False)
     fingerprint = link.get("fingerprint") or link.get("custom_fp") or "chrome"
@@ -4870,6 +4885,10 @@ async def singbox_subscription(uid: str, request: Request):
         {"rule_set": "geosite-category-ads-all", "action": "reject"},
     ]
 
+    bypass_iran = bool(link.get("bypass_iran", True))
+    bypass_china = bool(link.get("bypass_china", False))
+    bypass_russia = bool(link.get("bypass_russia", False))
+
     if bypass_iran:
         rules.append({"rule_set": "geosite-ir", "outbound": "direct"})
         rules.append({"rule_set": "geoip-ir", "outbound": "direct"})
@@ -4890,9 +4909,7 @@ async def singbox_subscription(uid: str, request: Request):
                 rules.append({"domain": d, "outbound": "🚀 Select"})
     rules.append({"network": "tcp", "outbound": "🚀 Select"})
     rules.append({"network": "udp", "outbound": "🚀 Select"})
-    bypass_iran = bool(link.get("bypass_iran", True))
-    bypass_china = bool(link.get("bypass_china", False))
-    bypass_russia = bool(link.get("bypass_russia", False))
+
     dns_config = {
         "servers": [
             {"tag": "dns-remote", "address": doh_url, "detour": "🚀 Select"},
@@ -11609,7 +11626,24 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
         config["inbounds"][0]["sniffing"]["routeOnly"] = False
         config["inbounds"][0]["sniffing"]["destOverride"] = ["fakedns", "tls", "http", "quic"]
 
+    config["policy"] = {
+        "levels": {
+            "0": {
+                "connIdle": 300,
+                "handshake": 4,
+                "uplinkOnly": 1,
+                "downlinkOnly": 1
+            }
+        },
+        "system": {
+            "statsOutboundUplink": True,
+            "statsOutboundDownlink": True
+        }
+    }
+    config["stats"] = {}
+
     return config
+
 
 @app.get("/sub/{uid}/xray-balancer")
 async def xray_balancer_config(uid: str, request: Request):
@@ -11739,7 +11773,34 @@ async def xray_balancer_config(uid: str, request: Request):
         }
     }
 
+    if proxy_line and proxy_line.get("is_active"):
+        proxy_out = {
+            "protocol": proxy_line.get("type", "socks").lower(),
+            "settings": {"servers": [{"address": proxy_line["host"], "port": int(proxy_line["port"])}]},
+            "tag": "proxy-line-out"
+        }
+        if proxy_line.get("username") and proxy_line.get("password"):
+            proxy_out["settings"]["servers"][0]["users"] = [{"user": proxy_line["username"], "pass": proxy_line["password"]}]
+        config["outbounds"].append(proxy_out)
+
+    config["policy"] = {
+        "levels": {
+            "0": {
+                "connIdle": 300,
+                "handshake": 4,
+                "uplinkOnly": 1,
+                "downlinkOnly": 1
+            }
+        },
+        "system": {
+            "statsOutboundUplink": True,
+            "statsOutboundDownlink": True
+        }
+    }
+    config["stats"] = {}
+
     return JSONResponse(content=config)
+
 
 @app.get("/sub/{uid}/xray-config")
 async def xray_config(uid: str, request: Request):
