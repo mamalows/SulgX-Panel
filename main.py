@@ -4436,9 +4436,11 @@ async def user_subscription(uid: str, request: Request):
         if not link or not link["active"]:
             raise HTTPException(status_code=404, detail="link not found or disabled")
         link = dict(link)
+
     expires = parse_expires_at(link.get("expires_at"))
     if expires and expires < datetime.now(timezone.utc):
         raise HTTPException(status_code=403, detail="link expired")
+
     status = "active"
     if link.get("limit_bytes") > 0 and link["used_bytes"] >= link["limit_bytes"]:
         status = "quota_exceeded"
@@ -4446,9 +4448,9 @@ async def user_subscription(uid: str, request: Request):
         status = "expired"
     elif not link["active"]:
         status = "blocked"
+
     ip_profile_id = link.get("ip_profile_id")
     addresses = []
-
     if ip_profile_id:
         profile_exists = False
         async with IP_PROFILES_LOCK:
@@ -4465,6 +4467,9 @@ async def user_subscription(uid: str, request: Request):
     else:
         async with CUSTOM_ADDRESSES_LOCK:
             addresses = list(CUSTOM_ADDRESSES)
+
+    allow_insecure = bool(link.get("allow_insecure", False))
+
     extra = {
         "custom_path": link.get("custom_path", ""),
         "custom_sni": link.get("custom_sni", ""),
@@ -4488,11 +4493,14 @@ async def user_subscription(uid: str, request: Request):
         "alpn": link.get("alpn", ""),
         "port": link.get("port", 443),
     }
+
     domain = get_domain(request)
     sub_content = await generate_subscription_content(link, uid, addresses, extra, status, server_domain=domain)
     encoded = base64.b64encode(sub_content.encode()).decode()
+
     total_bytes = link["limit_bytes"] if link["limit_bytes"] > 0 else UNLIMITED_QUOTA_BYTES
     expire_ts = int(expires.timestamp()) if expires else 0
+
     if STEALTH_MODE or SUB_FILENAME:
         filename = SUB_FILENAME if SUB_FILENAME else "update.txt"
     else:
@@ -4500,6 +4508,7 @@ async def user_subscription(uid: str, request: Request):
         expiry_str = "Unlimited" if not link.get("expires_at") else f"{seconds_until_expiry(link['expires_at'])//86400}d left" if seconds_until_expiry(link['expires_at']) else "Expired"
         filename = f"{link['label']} - {usage_str} - {expiry_str}.txt"
         filename = re.sub(r'[\\/*?:"<>|]', "_", filename)
+
     headers = {
         "Content-Type": "text/plain; charset=utf-8",
         "Content-Disposition": f'attachment; filename="{filename}"',
@@ -4507,6 +4516,7 @@ async def user_subscription(uid: str, request: Request):
         "subscription-userinfo": f"upload={link['used_bytes']}; download=0; total={total_bytes}; expire={expire_ts}",
         "X-Status": status,
     }
+
     log_event("Subscription", f"Subscription accessed for {link['label']} ({uid}) status={status}", ip=request.client.host)
     return Response(content=encoded, headers=headers)
 
