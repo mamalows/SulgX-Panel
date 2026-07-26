@@ -1709,10 +1709,13 @@ def generate_vless_link(uid: str, remark: str = "SulgX", address: str = None, ex
         else:
             params["alpn"] = "http/1.1"
 
+    if allow_insecure:
+        params["allowInsecure"] = "1"
+    else:
+        params["allowInsecure"] = "0"
+
     if fragment:
         params["fragment"] = fragment
-    if allow_insecure:
-        params["pinnedPeerCertificateChainSha256"] = quote(json.dumps([""]))
     if ech_enabled and ech_sni:
         ech_param = ech_sni
         if ech_doh:
