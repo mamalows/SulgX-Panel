@@ -1721,6 +1721,9 @@ def generate_vless_link(uid: str, remark: str = "SulgX", address: str = None, ex
     else:
         params["allowInsecure"] = "0"
 
+    if extra and extra.get("udp_enabled", True):
+        params["packetEncoding"] = "xudp"
+
     if fragment:
         params["fragment"] = fragment
     if ech_enabled and ech_sni:
@@ -4611,6 +4614,7 @@ async def clash_subscription(uid: str, request: Request):
     if not alpn:
         alpn = None
     port = link.get("port", 443)
+    udp_enabled = bool(link.get("udp_enabled", True))
 
     dns_mode = link.get("xray_dns_mode", "doh")
     doh_url = link.get("xray_doh_url") or DOH_UPSTREAMS[0] if DOH_UPSTREAMS else "https://cloudflare-dns.com/dns-query"
@@ -4668,9 +4672,10 @@ async def clash_subscription(uid: str, request: Request):
             "tls": True,
             "sni": link.get("custom_sni") or domain,
             "skip-cert-verify": allow_insecure,
-            "packet-encoding": "xudp",
-            "udp": True
+            "udp": udp_enabled
         }
+        if udp_enabled:
+            proxy["packet-encoding"] = "xudp"
 
         if network_type == "ws":
             proxy["network"] = "ws"
@@ -4837,6 +4842,7 @@ async def singbox_subscription(uid: str, request: Request):
     if not alpn:
         alpn = None
     port = link.get("port", 443)
+    udp_enabled = bool(link.get("udp_enabled", True))
 
     dns_mode = link.get("xray_dns_mode", "doh")
     doh_url = link.get("xray_doh_url") or DOH_UPSTREAMS[0] if DOH_UPSTREAMS else "https://cloudflare-dns.com/dns-query"
@@ -4875,7 +4881,6 @@ async def singbox_subscription(uid: str, request: Request):
             "server": addr,
             "server_port": port,
             "uuid": uid,
-            "packet_encoding": "xudp",
             "tls": {
                 "enabled": True,
                 "server_name": link.get("custom_sni") or domain,
@@ -4883,6 +4888,8 @@ async def singbox_subscription(uid: str, request: Request):
             },
             "transport": {}
         }
+        if udp_enabled:
+            proxy["packet_encoding"] = "xudp"
 
         if network_type == "ws":
             proxy["transport"]["type"] = "ws"
@@ -4945,7 +4952,10 @@ async def singbox_subscription(uid: str, request: Request):
             else:
                 rules.append({"domain": d, "outbound": "🚀 Select"})
     rules.append({"network": "tcp", "outbound": "🚀 Select"})
-    rules.append({"network": "udp", "outbound": "🚀 Select"})
+    if udp_enabled:
+        rules.append({"network": "udp", "outbound": "🚀 Select"})
+    else:
+        rules.append({"network": "udp", "outbound": "block"})
 
     dns_config = {
         "servers": [
@@ -11467,7 +11477,7 @@ async def test_all_proxy_lines(_=Depends(require_auth)):
         await asyncio.sleep(1.5)
     return {"results": results}
 
-def build_xray_config(link: dict, proxy_line: dict, request: Request, address: str) -> dict:
+ddef build_xray_config(link: dict, proxy_line: dict, request: Request, address: str) -> dict:
     uid = link["uid"]
     domain = get_domain(request)
     port = link.get("port", 443)
@@ -11571,6 +11581,8 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
             "maxStreams": 0
         }
 
+    udp_enabled = bool(link.get("udp_enabled", True))
+
     outbound = {
         "protocol": "vless",
         "settings": {
@@ -11583,6 +11595,8 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
         "streamSettings": stream_settings,
         "tag": "proxy"
     }
+    if udp_enabled:
+        outbound["settings"]["packet_encoding"] = "xudp"
 
     dns_mode = link.get("xray_dns_mode", "doh")
     allowed_domains_str = link.get("xray_allowed_domains", "")
@@ -11591,7 +11605,6 @@ def build_xray_config(link: dict, proxy_line: dict, request: Request, address: s
     bypass_iran = bool(link.get("bypass_iran", True))
     bypass_china = bool(link.get("bypass_china", False))
     bypass_russia = bool(link.get("bypass_russia", False))
-    udp_enabled = bool(link.get("udp_enabled", True))
 
     rules = [
         {"inboundTag": ["mixed-in"], "port": 53, "outboundTag": "dns-out", "type": "field"},
@@ -11740,6 +11753,7 @@ async def xray_balancer_config(uid: str, request: Request):
     alpn = link.get("alpn", "").strip()
     if not alpn:
         alpn = None
+    udp_enabled = bool(link.get("udp_enabled", True))
 
     stream_settings = {
         "network": "ws" if link.get("protocol", "vless-ws") == "vless-ws" else "xhttp",
@@ -11796,14 +11810,22 @@ async def xray_balancer_config(uid: str, request: Request):
             "streamSettings": dict(stream_settings),
             "tag": tag_name
         }
+        if udp_enabled:
+            ob["settings"]["packet_encoding"] = "xudp"
         outbounds.append(ob)
+
+    allowed_domains_str = link.get("xray_allowed_domains", "")
+    allowed_domains = [d.strip() for d in allowed_domains_str.split(",") if d.strip()]
 
     bypass_iran = bool(link.get("bypass_iran", True))
     bypass_china = bool(link.get("bypass_china", False))
     bypass_russia = bool(link.get("bypass_russia", False))
-    udp_enabled = bool(link.get("udp_enabled", True))
 
     rules = [
+        {"inboundTag": ["mixed-in"], "port": 53, "outboundTag": "dns-out", "type": "field"},
+        {"inboundTag": ["dns-in"], "outboundTag": "dns-out", "type": "field"},
+        {"inboundTag": ["remote-dns"], "outboundTag": "proxy", "type": "field"},
+        {"inboundTag": ["dns"], "outboundTag": "direct", "type": "field"},
         {"domain": ["geosite:private"], "outboundTag": "direct", "type": "field"},
         {"ip": ["geoip:private"], "outboundTag": "direct", "type": "field"}
     ]
@@ -11817,6 +11839,13 @@ async def xray_balancer_config(uid: str, request: Request):
     if bypass_russia:
         rules.append({"domain": ["regexp:.*\\.ru$"], "outboundTag": "direct", "type": "field"})
         rules.append({"ip": ["geoip:ru"], "outboundTag": "direct", "type": "field"})
+
+    if allowed_domains:
+        for d in allowed_domains:
+            if d.startswith("*."):
+                rules.append({"domain": [f"domain:{d[2:]}"], "outboundTag": "proxy", "type": "field"})
+            else:
+                rules.append({"domain": [f"full:{d}"], "outboundTag": "proxy", "type": "field"})
 
     if udp_enabled:
         rules.append({"network": "udp", "balancerTag": "balancer", "type": "field"})
@@ -11845,9 +11874,17 @@ async def xray_balancer_config(uid: str, request: Request):
                     "routeOnly": True
                 },
                 "tag": "mixed-in"
+            },
+            {
+                "listen": "127.0.0.1",
+                "port": 10853,
+                "protocol": "dokodemo-door",
+                "settings": {"address": "1.1.1.1", "network": "tcp,udp", "port": 53},
+                "tag": "dns-in"
             }
         ],
         "outbounds": outbounds + [
+            {"protocol": "dns", "settings": {"nonIPQuery": "reject"}, "tag": "dns-out"},
             {"protocol": "freedom", "settings": {"domainStrategy": "UseIP"}, "tag": "direct"},
             {"protocol": "blackhole", "settings": {"response": {"type": "http"}}, "tag": "block"}
         ],
